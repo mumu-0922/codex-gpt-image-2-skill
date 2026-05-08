@@ -82,7 +82,8 @@ python C:\Users\123\.codex\skills\gen-images\scripts\gen_images.py `
   --size 1920x1080 `
   --background transparent `
   --output-format png `
-  --resize-mode contain
+  --resize-mode contain `
+  --output-dir .\assets\ui
 ```
 
 Edit:
@@ -151,6 +152,35 @@ Images are saved under:
 ./gen-images/
 ```
 
+You can choose the output folder:
+
+```powershell
+python C:\Users\123\.codex\skills\gen-images\scripts\gen_images.py `
+  --mode generate `
+  --prompt "blue ocean wave game UI panel, no text" `
+  --output-dir .\assets\ui `
+  --output-format png
+```
+
+This saves a prompt-derived file name such as:
+
+```text
+.\assets\ui\blue-ocean-wave-game-ui-panel-no-text.png
+```
+
+You can also set an explicit base name:
+
+```powershell
+python C:\Users\123\.codex\skills\gen-images\scripts\gen_images.py `
+  --mode generate `
+  --prompt "blue ocean wave game UI panel, no text" `
+  --output-dir .\assets\ui `
+  --output-name beach-panel `
+  --output-format png
+```
+
+If `--output-dir` is omitted, the legacy default remains `./gen-images/` with timestamped names like `20260508-113439-01.png`. Multiple images add `-01`, `-02`, etc. Existing files are not overwritten; a numeric suffix is added.
+
 Success result:
 
 ```json
@@ -165,6 +195,8 @@ Success result:
     "quality": "low",
     "background": "transparent",
     "output_format": "png",
+    "output_dir": ".\\assets\\ui",
+    "output_name": null,
     "n": 1
   }
 }

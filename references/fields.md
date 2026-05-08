@@ -35,6 +35,8 @@ Edit-only:
 Local-only:
 
 - `resize_mode`: `contain`, `cover`, or `stretch`
+- `output_dir`: destination folder; default is `./gen-images`
+- `output_name`: destination file base name; extension is derived from `output_format`
 
 ## Natural Language Mapping
 
@@ -74,6 +76,13 @@ Resize:
 - `UI overlay`, `Unity UI`, `icon`, `panel`, `transparent layer` -> `resize_mode=contain`
 - `full screen background`, `cover`, `铺满` -> `resize_mode=cover`
 - `stretch`, `拉伸` -> `resize_mode=stretch`
+
+Output:
+
+- `保存到 assets/ui`, `输出到 ./images`, `save to ./out` -> `output_dir=<path>`
+- `命名为 beach-panel`, `filename beach-panel`, `output name beach-panel` -> `output_name=beach-panel`
+- output folder specified but output name omitted -> save with a prompt-derived slug
+- neither output folder nor output name specified -> save under `./gen-images/` with timestamp naming
 
 ## Size Handling
 

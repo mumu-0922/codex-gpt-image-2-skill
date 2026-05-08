@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import struct
 import sys
+import tempfile
 import time
 import tomllib
 import urllib.error
@@ -29,6 +30,7 @@ RESIZE_MODE_KEY = "_resize_mode"
 RESTORE_SOURCE_SIZE_KEY = "_restore_source_size"
 CHROMA_KEY_HEX = "#ff00ff"
 CHROMA_KEY_RGB = (255, 0, 255)
+DEFAULT_OUTPUT_DIR_NAME = "gen-images"
 SUPPORTED_GPT_IMAGE_2_SIZES = {
     "1024x1024": (1024, 1024),
     "1536x1024": (1536, 1024),
@@ -270,10 +272,67 @@ def apply_transparent_generation_fallback(payload: dict):
     )
 
 
-def ensure_output_dir():
-    output_dir = Path.cwd() / "gen-images"
+def ensure_output_dir(output_dir: str | None = None):
+    output_dir = Path(output_dir).expanduser() if output_dir else Path.cwd() / DEFAULT_OUTPUT_DIR_NAME
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
+
+
+def sanitize_output_basename(value: str | None, fallback: str = "image"):
+    if not value:
+        return fallback
+    value = re.sub(r"\.(png|jpe?g|webp)$", "", value.strip(), flags=re.IGNORECASE)
+    chars = []
+    previous_separator = False
+    for char in value.lower():
+        if char.isalnum():
+            chars.append(char)
+            previous_separator = False
+        elif char in {"-", "_"}:
+            chars.append(char)
+            previous_separator = False
+        elif not previous_separator:
+            chars.append("-")
+            previous_separator = True
+    basename = "".join(chars).strip("-_.")
+    if not basename:
+        basename = fallback
+    if basename.upper() in {"CON", "PRN", "AUX", "NUL", "COM1", "LPT1"}:
+        basename = f"{basename}-image"
+    return (basename[:96].rstrip("-_.") or fallback)
+
+
+def unique_output_path(path: Path):
+    if not path.exists():
+        return path
+    for suffix in range(2, 10000):
+        candidate = path.with_name(f"{path.stem}-{suffix}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    fail(f"无法生成不冲突的输出文件名: {path}")
+
+
+def build_output_path(
+    output_dir: Path,
+    ext: str,
+    index: int,
+    count: int,
+    timestamp: str,
+    output_name: str | None = None,
+    prompt: str | None = None,
+    prompt_name_when_available: bool = False,
+):
+    basename = None
+    if output_name:
+        basename = sanitize_output_basename(output_name)
+    elif prompt_name_when_available and prompt:
+        basename = sanitize_output_basename(prompt)
+
+    if basename:
+        filename = f"{basename}.{ext}" if count == 1 else f"{basename}-{index:02d}.{ext}"
+    else:
+        filename = f"{timestamp}-{index:02d}.{ext}"
+    return unique_output_path(output_dir / filename)
 
 
 def retry_transient(operation, attempts: int = 3, delays: tuple[int, ...] = (5, 10)):
@@ -290,10 +349,17 @@ def retry_transient(operation, attempts: int = 3, delays: tuple[int, ...] = (5, 
     raise last_error
 
 
-def save_images(image_entries, output_format: str | None):
-    output_dir = ensure_output_dir()
+def save_images(
+    image_entries,
+    output_format: str | None,
+    output_dir: str | None = None,
+    output_name: str | None = None,
+    prompt: str | None = None,
+):
+    output_dir_path = ensure_output_dir(output_dir)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     paths = []
+    count = len(image_entries)
 
     for index, item in enumerate(image_entries, start=1):
         ext = choose_extension(output_format)
@@ -308,7 +374,16 @@ def save_images(image_entries, output_format: str | None):
         else:
             fail("接口返回中未找到可保存的图片数据")
 
-        file_path = output_dir / f"{timestamp}-{index:02d}.{ext}"
+        file_path = build_output_path(
+            output_dir_path,
+            ext,
+            index,
+            count,
+            timestamp,
+            output_name,
+            prompt,
+            prompt_name_when_available=bool(output_dir),
+        )
         file_path.write_bytes(binary)
         paths.append(str(file_path))
 
@@ -586,10 +661,14 @@ def save_image_bytes(
     resize_target: tuple[int, int] | None = None,
     resize_mode: str = "contain",
     restore_alpha_source: bytes | None = None,
+    output_dir: str | None = None,
+    output_name: str | None = None,
+    prompt: str | None = None,
 ):
-    output_dir = ensure_output_dir()
+    output_dir_path = ensure_output_dir(output_dir)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     paths = []
+    count = len(image_entries)
 
     for index, item in enumerate(image_entries, start=1):
         ext = choose_extension(output_format)
@@ -625,7 +704,16 @@ def save_image_bytes(
             except Exception as exc:
                 fail(f"透明通道恢复失败: {exc}")
 
-        file_path = output_dir / f"{timestamp}-{index:02d}.{ext}"
+        file_path = build_output_path(
+            output_dir_path,
+            ext,
+            index,
+            count,
+            timestamp,
+            output_name,
+            prompt,
+            prompt_name_when_available=bool(output_dir),
+        )
         file_path.write_bytes(binary)
         paths.append(str(file_path))
 
@@ -669,7 +757,7 @@ def should_retry_with_curl(exc: urllib.error.URLError):
 
 
 def post_json_with_curl(url: str, token: str, payload: dict):
-    output_dir = ensure_output_dir()
+    output_dir = Path(tempfile.gettempdir())
     request_path = output_dir / f"request-{uuid.uuid4().hex}.json"
     response_path = output_dir / f"response-{uuid.uuid4().hex}.json"
     request_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -735,7 +823,7 @@ def post_multipart_with_curl(
     image_sources: list[str],
     mask_source: str | None,
 ):
-    output_dir = ensure_output_dir()
+    output_dir = Path(tempfile.gettempdir())
     response_path = output_dir / f"response-{uuid.uuid4().hex}.json"
     command = [
         "curl.exe",
@@ -943,6 +1031,8 @@ def parse_args():
     parser.add_argument("--moderation")
     parser.add_argument("--input-fidelity", dest="input_fidelity")
     parser.add_argument("--resize-mode", dest="resize_mode", choices=["contain", "cover", "stretch"])
+    parser.add_argument("--output-dir", dest="output_dir")
+    parser.add_argument("--output-name", dest="output_name")
     return parser.parse_args()
 
 
@@ -994,6 +1084,8 @@ def main():
         "quality": api_payload.get("quality"),
         "background": "transparent" if transparent_postprocess else api_payload.get("background"),
         "output_format": api_payload.get("output_format") or "png",
+        "output_dir": args.output_dir,
+        "output_name": args.output_name,
         "n": api_payload.get("n", 1),
     }
     if args.mode == "edit" and api_payload.get("input_fidelity") is not None:
@@ -1006,6 +1098,9 @@ def main():
         resize_target,
         resize_mode,
         restore_alpha_source,
+        args.output_dir,
+        args.output_name,
+        args.prompt,
     )
     print(json.dumps({"ok": True, "paths": paths, "used_params": used_params}, ensure_ascii=False))
 

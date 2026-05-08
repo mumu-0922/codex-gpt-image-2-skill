@@ -55,6 +55,8 @@ Extract these when present:
 - `partial_images`
 - `input_fidelity` for edit only
 - `resize_mode`
+- `output_dir`
+- `output_name`
 - `mask`
 
 Do not repeatedly ask for optional fields. Use defaults when unspecified.
@@ -132,7 +134,8 @@ python "<skill-dir>/scripts/gen_images.py" \
   --size 1920x1080 \
   --background transparent \
   --output-format png \
-  --resize-mode contain
+  --resize-mode contain \
+  --output-dir "./assets/ui"
 ```
 
 ## Runtime Config
@@ -151,16 +154,20 @@ When installed under `.claude`, the script reads:
 
 ## Output
 
-Saved images go to the current working directory:
+Default output goes to the current working directory:
 
 ```text
 ./gen-images/
 ```
 
+If the user specifies a folder/path, pass `--output-dir`. When `--output-dir` is set and `--output-name` is omitted, the saved file name is derived from the prompt as a safe slug.
+
+If the user specifies an exact name, pass `--output-name`. Extensions in `--output-name` are ignored; the final extension follows `output_format` or post-processing. Multiple images append `-01`, `-02`, etc. Existing files are not overwritten; a numeric suffix is added.
+
 The script prints JSON:
 
 ```json
-{"ok": true, "paths": ["..."], "used_params": {"model": "gpt-image-2", "size": "1920x1080", "generation_size": "1536x1024", "resize_mode": "contain", "background": "transparent", "output_format": "png", "n": 1}}
+{"ok": true, "paths": ["..."], "used_params": {"model": "gpt-image-2", "size": "1920x1080", "generation_size": "1536x1024", "resize_mode": "contain", "background": "transparent", "output_format": "png", "output_dir": "./assets/ui", "output_name": null, "n": 1}}
 ```
 
 On failure:
