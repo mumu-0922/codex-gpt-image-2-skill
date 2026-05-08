@@ -1,6 +1,6 @@
 # gen-images
 
-`gen-images` is a Codex/Claude skill for generating and editing images through a CLIProxyAPI-compatible `gpt-image-2` backend.
+`gen-images` is a Codex/Claude skill for generating and editing images through a `gpt-image-2` backend exposed by an OpenAI-compatible relay, such as a sub2api-style proxy.
 
 ## Features
 
@@ -14,10 +14,10 @@
 ## Requirements
 
 - Python 3.11+
-- A CLIProxyAPI-compatible backend that supports:
-  - `POST /images/generations` for Codex-style base URLs
-  - `POST /images/edits` for Codex-style base URLs
-  - or `/v1/images/generations` and `/v1/images/edits` for Claude-style base URLs
+- An OpenAI-compatible image backend or relay that supports `gpt-image-2` image endpoints.
+  - Codex mode calls `<base_url>/images/generations` and `<base_url>/images/edits`.
+  - If your relay expects standard OpenAI `/v1/images/...` paths, set Codex `base_url` to include `/v1`.
+  - Claude mode calls `<base_url>/v1/images/generations` and `<base_url>/v1/images/edits`.
 - `curl.exe` on Windows is optional but recommended as a TLS fallback
 
 ## Install For Codex
@@ -56,6 +56,14 @@ The script uses `model_provider` from `config.toml` and then reads:
 [model_providers.<active-provider>]
 base_url = "https://your-proxy.example"
 ```
+
+For a sub2api or OpenAI-compatible relay, configure `base_url` so the final URL produced by the script is accepted by your relay. In Codex mode, this usually means:
+
+```toml
+base_url = "https://your-relay.example/v1"
+```
+
+Any relay can work as long as it is compatible with the image generation/edit API shape used by OpenAI-compatible `gpt-image-2` providers. A relay that only supports chat completions will not work.
 
 The token is read from:
 

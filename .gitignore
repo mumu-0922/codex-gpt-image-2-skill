@@ -13,3 +13,4 @@ gen-images/
 *.jpg
 *.jpeg
 *.webp
+.ace-tool/

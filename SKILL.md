@@ -1,13 +1,13 @@
 ---
 name: gen-images
-description: Use when the user asks to generate or edit images with gpt-image-2, including "生成图片", "文生图", "修改图片", "编辑图片", "改图", transparent PNG output, or arbitrary target UI asset sizes through CLIProxyAPI.
+description: Use when the user asks to generate or edit images with gpt-image-2, including "生成图片", "文生图", "修改图片", "编辑图片", "改图", transparent PNG output, or arbitrary target UI asset sizes through an OpenAI-compatible relay such as sub2api.
 argument-hint: <natural language image request>
 allowed-tools: [Bash, Read]
 ---
 
 # gen-images
 
-Use this skill to call `gpt-image-2` through CLIProxyAPI for image generation and image editing.
+Use this skill to call `gpt-image-2` through an OpenAI-compatible relay such as sub2api for image generation and image editing.
 
 ## Task Types
 
@@ -143,6 +143,7 @@ When installed under `.codex`, the script reads:
 - `~/.codex/auth.json`
 
 It uses the active `model_provider` from `config.toml`, then reads that provider's `base_url`.
+For Codex mode, set `base_url` so `<base_url>/images/generations` and `<base_url>/images/edits` are valid for the relay. If the relay expects standard `/v1/images/...` endpoints, include `/v1` in `base_url`.
 
 When installed under `.claude`, the script reads:
 
