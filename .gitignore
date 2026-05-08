@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+
+.env
+.env.*
+auth.json
+config.toml
+
+gen-images/
+.tmp-tests/
+
+*.png
+*.jpg
+*.jpeg
+*.webp
