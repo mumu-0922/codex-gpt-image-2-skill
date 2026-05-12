@@ -7,6 +7,7 @@ import mimetypes
 import os
 import re
 import shutil
+import socket
 import subprocess
 import struct
 import sys
@@ -31,6 +32,7 @@ RESTORE_SOURCE_SIZE_KEY = "_restore_source_size"
 CHROMA_KEY_HEX = "#ff00ff"
 CHROMA_KEY_RGB = (255, 0, 255)
 DEFAULT_OUTPUT_DIR_NAME = "gen-images"
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 600
 SUPPORTED_GPT_IMAGE_2_SIZES = {
     "1024x1024": (1024, 1024),
     "1536x1024": (1536, 1024),
@@ -347,6 +349,18 @@ def retry_transient(operation, attempts: int = 3, delays: tuple[int, ...] = (5, 
             delay = delays[min(attempt, len(delays) - 1)]
             time.sleep(delay)
     raise last_error
+
+
+def normalize_request_timeout(value: int | float | str | None):
+    if value is None:
+        return DEFAULT_REQUEST_TIMEOUT_SECONDS
+    try:
+        timeout = int(value)
+    except (TypeError, ValueError):
+        fail("request_timeout must be an integer number of seconds")
+    if timeout <= 0:
+        fail("request_timeout must be greater than 0")
+    return timeout
 
 
 def save_images(
@@ -720,7 +734,7 @@ def save_image_bytes(
     return paths
 
 
-def post_json(url: str, token: str, payload: dict):
+def post_json(url: str, token: str, payload: dict, request_timeout: int = DEFAULT_REQUEST_TIMEOUT_SECONDS):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -732,7 +746,7 @@ def post_json(url: str, token: str, payload: dict):
         },
     )
     try:
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=request_timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code in (502, 504):
@@ -746,17 +760,26 @@ def post_json(url: str, token: str, payload: dict):
         fail(f"接口调用失败: {message}")
     except urllib.error.URLError as exc:
         if should_retry_with_curl(exc):
-            return post_json_with_curl(url, token, payload)
+            return post_json_with_curl(url, token, payload, request_timeout)
+        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            raise TransientImageApiError(f"request timed out after {request_timeout}s")
         fail(f"网络请求失败: {exc.reason}")
     except http.client.RemoteDisconnected:
         raise TransientImageApiError("RemoteDisconnected")
+    except (TimeoutError, socket.timeout):
+        raise TransientImageApiError(f"request timed out after {request_timeout}s")
 
 
 def should_retry_with_curl(exc: urllib.error.URLError):
     return os.name == "nt" and shutil.which("curl.exe") and "SSL" in str(exc.reason)
 
 
-def post_json_with_curl(url: str, token: str, payload: dict):
+def post_json_with_curl(
+    url: str,
+    token: str,
+    payload: dict,
+    request_timeout: int = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+):
     output_dir = Path(tempfile.gettempdir())
     request_path = output_dir / f"request-{uuid.uuid4().hex}.json"
     response_path = output_dir / f"response-{uuid.uuid4().hex}.json"
@@ -768,6 +791,8 @@ def post_json_with_curl(url: str, token: str, payload: dict):
         "--silent",
         "--show-error",
         "--ssl-no-revoke",
+        "--max-time",
+        str(request_timeout),
         "--request",
         "POST",
         "--url",
@@ -782,9 +807,11 @@ def post_json_with_curl(url: str, token: str, payload: dict):
         str(response_path),
     ]
     try:
-        result = subprocess.run(command, text=True, capture_output=True, timeout=900)
+        result = subprocess.run(command, text=True, capture_output=True, timeout=request_timeout + 30)
         raw = response_path.read_text(encoding="utf-8") if response_path.exists() else ""
         if result.returncode != 0:
+            if result.returncode == 28 or "timed out" in result.stderr.lower() or "timeout" in result.stderr.lower():
+                raise TransientImageApiError(f"request timed out after {request_timeout}s")
             if "502" in raw or "504" in raw or "Gateway Time-out" in raw or "Gateway Timeout" in raw:
                 raise TransientImageApiError(raw or result.stderr or "transient gateway failure")
             try:
@@ -794,6 +821,8 @@ def post_json_with_curl(url: str, token: str, payload: dict):
                 message = raw or result.stderr or f"curl exited {result.returncode}"
             fail(f"接口调用失败: {message}")
         return json.loads(raw)
+    except subprocess.TimeoutExpired as exc:
+        raise TransientImageApiError(f"request timed out after {request_timeout}s") from exc
     finally:
         try:
             request_path.unlink(missing_ok=True)
@@ -805,6 +834,8 @@ def post_json_with_curl(url: str, token: str, payload: dict):
 def parse_curl_response(response_path: Path, result: subprocess.CompletedProcess):
     raw = response_path.read_text(encoding="utf-8") if response_path.exists() else ""
     if result.returncode != 0:
+        if result.returncode == 28 or "timed out" in result.stderr.lower() or "timeout" in result.stderr.lower():
+            raise TransientImageApiError("request timed out")
         if "502" in raw or "504" in raw or "Gateway Time-out" in raw or "Gateway Timeout" in raw:
             raise TransientImageApiError(raw or result.stderr or "transient gateway failure")
         try:
@@ -822,6 +853,7 @@ def post_multipart_with_curl(
     payload: dict,
     image_sources: list[str],
     mask_source: str | None,
+    request_timeout: int = DEFAULT_REQUEST_TIMEOUT_SECONDS,
 ):
     output_dir = Path(tempfile.gettempdir())
     response_path = output_dir / f"response-{uuid.uuid4().hex}.json"
@@ -831,6 +863,8 @@ def post_multipart_with_curl(
         "--silent",
         "--show-error",
         "--ssl-no-revoke",
+        "--max-time",
+        str(request_timeout),
         "--request",
         "POST",
         "--url",
@@ -861,8 +895,10 @@ def post_multipart_with_curl(
 
     command.extend(["--output", str(response_path)])
     try:
-        result = subprocess.run(command, text=True, capture_output=True, timeout=900)
+        result = subprocess.run(command, text=True, capture_output=True, timeout=request_timeout + 30)
         return parse_curl_response(response_path, result)
+    except subprocess.TimeoutExpired as exc:
+        raise TransientImageApiError(f"request timed out after {request_timeout}s") from exc
     finally:
         try:
             response_path.unlink(missing_ok=True)
@@ -870,7 +906,14 @@ def post_multipart_with_curl(
             pass
 
 
-def post_multipart(url: str, token: str, payload: dict, image_sources: list[str], mask_source: str | None):
+def post_multipart(
+    url: str,
+    token: str,
+    payload: dict,
+    image_sources: list[str],
+    mask_source: str | None,
+    request_timeout: int = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+):
     boundary = f"----genImages{uuid.uuid4().hex}"
     parts = bytearray()
 
@@ -924,7 +967,7 @@ def post_multipart(url: str, token: str, payload: dict, image_sources: list[str]
         },
     )
     try:
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=request_timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code in (502, 504):
@@ -938,10 +981,14 @@ def post_multipart(url: str, token: str, payload: dict, image_sources: list[str]
         fail(f"接口调用失败: {message}")
     except urllib.error.URLError as exc:
         if should_retry_with_curl(exc):
-            return post_multipart_with_curl(url, token, payload, image_sources, mask_source)
+            return post_multipart_with_curl(url, token, payload, image_sources, mask_source, request_timeout)
+        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            raise TransientImageApiError(f"request timed out after {request_timeout}s")
         fail(f"网络请求失败: {exc.reason}")
     except http.client.RemoteDisconnected:
-        return post_multipart_with_curl(url, token, payload, image_sources, mask_source)
+        return post_multipart_with_curl(url, token, payload, image_sources, mask_source, request_timeout)
+    except (TimeoutError, socket.timeout):
+        raise TransientImageApiError(f"request timed out after {request_timeout}s")
 
 
 def build_generation_payload(args):
@@ -1033,6 +1080,7 @@ def parse_args():
     parser.add_argument("--resize-mode", dest="resize_mode", choices=["contain", "cover", "stretch"])
     parser.add_argument("--output-dir", dest="output_dir")
     parser.add_argument("--output-name", dest="output_name")
+    parser.add_argument("--request-timeout", dest="request_timeout", type=int, default=DEFAULT_REQUEST_TIMEOUT_SECONDS)
     return parser.parse_args()
 
 
@@ -1049,6 +1097,7 @@ def main():
         payload = build_edit_payload(args)
 
     url = build_api_url(caller, base_url, args.mode)
+    request_timeout = normalize_request_timeout(args.request_timeout)
 
     transparent_postprocess = should_chroma_key_transparency(payload)
     resize_target = payload.pop(RESIZE_TARGET_KEY, None)
@@ -1068,10 +1117,10 @@ def main():
 
     if args.mode == "edit":
         response = retry_transient(
-            lambda: post_multipart(url, token, api_payload, image_sources or [], mask_source)
+            lambda: post_multipart(url, token, api_payload, image_sources or [], mask_source, request_timeout)
         )
     else:
-        response = retry_transient(lambda: post_json(url, token, api_payload))
+        response = retry_transient(lambda: post_json(url, token, api_payload, request_timeout))
     data = response.get("data")
     if not isinstance(data, list) or not data:
         fail("接口返回中缺少 data")
@@ -1086,6 +1135,7 @@ def main():
         "output_format": api_payload.get("output_format") or "png",
         "output_dir": args.output_dir,
         "output_name": args.output_name,
+        "request_timeout": request_timeout,
         "n": api_payload.get("n", 1),
     }
     if args.mode == "edit" and api_payload.get("input_fidelity") is not None:

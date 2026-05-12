@@ -37,6 +37,7 @@ Local-only:
 - `resize_mode`: `contain`, `cover`, or `stretch`
 - `output_dir`: destination folder; default is `./gen-images`
 - `output_name`: destination file base name; extension is derived from `output_format`
+- `request_timeout`: request timeout in seconds; default is `600`
 
 ## Natural Language Mapping
 
@@ -84,6 +85,12 @@ Output:
 - output folder specified but output name omitted -> save with a prompt-derived slug
 - neither output folder nor output name specified -> save under `./gen-images/` with timestamp naming
 
+Timeout:
+
+- `超时时间 900 秒`, `timeout 900`, `request timeout 900` -> `request_timeout=900`
+- slow relay, edit mode, transparent PNG, or large final target -> consider `request_timeout=900` or `1200`
+- repeated request timeout, 502, or 504 -> likely relay/upstream timeout or capacity issue
+
 ## Size Handling
 
 Native stable generation sizes:
@@ -117,16 +124,16 @@ This avoids upstream failures when `background=transparent` is unsupported by th
 
 ## Timeout Guidance
 
-Use 10 minutes for normal jobs:
+Default request timeout is 600 seconds. Use 10 minutes for normal jobs:
 
 ```text
-timeout=600000
+request_timeout=600
 ```
 
 Use 15 minutes for very large or complex jobs:
 
 ```text
-timeout=900000
+request_timeout=900
 ```
 
 Target sizes above 8 million pixels should use the longer timeout even if native generation uses a smaller supported size.

@@ -83,7 +83,8 @@ python C:\Users\123\.codex\skills\gen-images\scripts\gen_images.py `
   --background transparent `
   --output-format png `
   --resize-mode contain `
-  --output-dir .\assets\ui
+  --output-dir .\assets\ui `
+  --request-timeout 900
 ```
 
 Edit:
@@ -144,6 +145,21 @@ When `--background transparent` is used with `gpt-image-2`, the script:
 
 If no transparent background is requested, the script leaves `background` unset so the backend can use its default `auto` behavior.
 
+## Request Timeout
+
+The default request timeout is 600 seconds. Use a larger value for slow relays, edit mode, transparent assets, or large final output sizes:
+
+```powershell
+python C:\Users\123\.codex\skills\gen-images\scripts\gen_images.py `
+  --mode generate `
+  --prompt "large beach island Unity UI background, no text" `
+  --size 1920x1080 `
+  --output-format png `
+  --request-timeout 900
+```
+
+HTTP 502, HTTP 504, gateway timeout, `RemoteDisconnected`, and local request timeout are treated as transient failures and retried before the script returns a JSON error. Repeated timeout errors usually mean the relay or upstream image provider is overloaded or its gateway timeout is too short.
+
 ## Output
 
 Images are saved under:
@@ -197,6 +213,7 @@ Success result:
     "output_format": "png",
     "output_dir": ".\\assets\\ui",
     "output_name": null,
+    "request_timeout": 900,
     "n": 1
   }
 }

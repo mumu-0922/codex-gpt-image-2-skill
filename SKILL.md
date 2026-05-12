@@ -57,6 +57,7 @@ Extract these when present:
 - `resize_mode`
 - `output_dir`
 - `output_name`
+- `request_timeout`
 - `mask`
 
 Do not repeatedly ask for optional fields. Use defaults when unspecified.
@@ -135,8 +136,15 @@ python "<skill-dir>/scripts/gen_images.py" \
   --background transparent \
   --output-format png \
   --resize-mode contain \
-  --output-dir "./assets/ui"
+  --output-dir "./assets/ui" \
+  --request-timeout 900
 ```
+
+## Timeout Rules
+
+Default request timeout is 600 seconds.
+
+Use `--request-timeout 900` or higher for large images, edit mode, transparent post-processing, or slow relays. Request timeout, HTTP 502/504, and `RemoteDisconnected` are treated as transient failures and retried before returning a JSON error.
 
 ## Runtime Config
 
@@ -167,7 +175,7 @@ If the user specifies an exact name, pass `--output-name`. Extensions in `--outp
 The script prints JSON:
 
 ```json
-{"ok": true, "paths": ["..."], "used_params": {"model": "gpt-image-2", "size": "1920x1080", "generation_size": "1536x1024", "resize_mode": "contain", "background": "transparent", "output_format": "png", "output_dir": "./assets/ui", "output_name": null, "n": 1}}
+{"ok": true, "paths": ["..."], "used_params": {"model": "gpt-image-2", "size": "1920x1080", "generation_size": "1536x1024", "resize_mode": "contain", "background": "transparent", "output_format": "png", "output_dir": "./assets/ui", "output_name": null, "request_timeout": 900, "n": 1}}
 ```
 
 On failure:
@@ -181,3 +189,4 @@ On failure:
 - Do not include unsupported OpenAI API fields such as `response_format` or default `stream` in image generation requests.
 - Edit mode uses multipart upload with `image[]` and optional `mask`.
 - Windows TLS failures fall back to `curl.exe --ssl-no-revoke`.
+- Repeated `request timed out`, 502, or 504 errors usually indicate relay/upstream capacity or gateway timeout, not a local post-processing failure.
